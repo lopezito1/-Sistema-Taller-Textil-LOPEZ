@@ -1,0 +1,174 @@
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'TallerTextilDB')
+BEGIN
+    CREATE DATABASE TallerTextilDB;
+END
+GO
+
+USE TallerTextilDB;
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Tela')
+BEGIN
+    CREATE TABLE Tela (
+        idTela INT IDENTITY(1,1) PRIMARY KEY,
+        nombre VARCHAR(100) NOT NULL,
+        tipo VARCHAR(50),
+        color VARCHAR(50),
+        stockActual DECIMAL(10,2) DEFAULT 0,
+        unidadMedida VARCHAR(20)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Movimiento_Tela')
+BEGIN
+    CREATE TABLE Movimiento_Tela (
+        idMovimiento INT IDENTITY(1,1) PRIMARY KEY,
+        idTela INT NOT NULL,
+        tipoMovimiento VARCHAR(20) CHECK (tipoMovimiento IN ('Entrada','Salida')),
+        cantidad DECIMAL(10,2) NOT NULL,
+        fecha DATETIME DEFAULT GETDATE(),
+        motivo VARCHAR(255),
+        CONSTRAINT FK_MovimientoTela_Tela FOREIGN KEY (idTela) REFERENCES Tela(idTela)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Cliente')
+BEGIN
+    CREATE TABLE Cliente (
+        idCliente INT IDENTITY(1,1) PRIMARY KEY,
+        nombre VARCHAR(100) NOT NULL,
+        telefono VARCHAR(20),
+        direccion VARCHAR(150)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Pedido')
+BEGIN
+    CREATE TABLE Pedido (
+        idPedido INT IDENTITY(1,1) PRIMARY KEY,
+        idCliente INT NOT NULL,
+        fechaPedido DATE DEFAULT GETDATE(),
+        fechaEntrega DATE,
+        estado VARCHAR(30),
+        total DECIMAL(10,2),
+        CONSTRAINT FK_Pedido_Cliente FOREIGN KEY (idCliente) REFERENCES Cliente(idCliente)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Prenda')
+BEGIN
+    CREATE TABLE Prenda (
+        idPrenda INT IDENTITY(1,1) PRIMARY KEY,
+        nombre VARCHAR(100) NOT NULL,
+        descripcion VARCHAR(255),
+        precioBase DECIMAL(10,2)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Detalle_Pedido')
+BEGIN
+    CREATE TABLE Detalle_Pedido (
+        idDetalle INT IDENTITY(1,1) PRIMARY KEY,
+        idPedido INT NOT NULL,
+        idPrenda INT NOT NULL,
+        cantidad INT NOT NULL,
+        precioUnitario DECIMAL(10,2),
+        subtotal DECIMAL(10,2),
+        CONSTRAINT FK_DetallePedido_Pedido FOREIGN KEY (idPedido) REFERENCES Pedido(idPedido),
+        CONSTRAINT FK_DetallePedido_Prenda FOREIGN KEY (idPrenda) REFERENCES Prenda(idPrenda)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Costurera')
+BEGIN
+    CREATE TABLE Costurera (
+        idCosturera INT IDENTITY(1,1) PRIMARY KEY,
+        nombre VARCHAR(100) NOT NULL,
+        especialidad VARCHAR(100),
+        telefono VARCHAR(20)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Produccion')
+BEGIN
+    CREATE TABLE Produccion (
+        idProduccion INT IDENTITY(1,1) PRIMARY KEY,
+        idCosturera INT NOT NULL,
+        idPrenda INT NOT NULL,
+        cantidad INT NOT NULL,
+        fechaProduccion DATE DEFAULT GETDATE(),
+        CONSTRAINT FK_Produccion_Costurera FOREIGN KEY (idCosturera) REFERENCES Costurera(idCosturera),
+        CONSTRAINT FK_Produccion_Prenda FOREIGN KEY (idPrenda) REFERENCES Prenda(idPrenda)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Ingreso')
+BEGIN
+    CREATE TABLE Ingreso (
+        idIngreso INT IDENTITY(1,1) PRIMARY KEY,
+        idPedido INT NOT NULL,
+        monto DECIMAL(10,2) NOT NULL,
+        fecha DATE DEFAULT GETDATE(),
+        metodoPago VARCHAR(50),
+        CONSTRAINT FK_Ingreso_Pedido FOREIGN KEY (idPedido) REFERENCES Pedido(idPedido)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Gasto')
+BEGIN
+    CREATE TABLE Gasto (
+        idGasto INT IDENTITY(1,1) PRIMARY KEY,
+        descripcion VARCHAR(255),
+        monto DECIMAL(10,2) NOT NULL,
+        fecha DATE DEFAULT GETDATE(),
+        categoria VARCHAR(100)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.views WHERE name = 'Vista_Ganancia_Semanal')
+BEGIN
+    EXEC('
+    CREATE VIEW Vista_Ganancia_Semanal AS
+    SELECT 
+        DATEPART(WEEK, ISNULL(i.fecha, g.fecha)) AS Semana,
+        SUM(ISNULL(i.monto,0)) AS TotalIngresos,
+        SUM(ISNULL(g.monto,0)) AS TotalGastos,
+        SUM(ISNULL(i.monto,0)) - SUM(ISNULL(g.monto,0)) AS Ganancia
+    FROM Ingreso i
+    FULL OUTER JOIN Gasto g 
+        ON DATEPART(WEEK, i.fecha) = DATEPART(WEEK, g.fecha)
+    GROUP BY DATEPART(WEEK, ISNULL(i.fecha, g.fecha))
+    ');
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.triggers WHERE name = 'TR_ActualizarStock')
+BEGIN
+    EXEC('
+    CREATE TRIGGER TR_ActualizarStock
+    ON Movimiento_Tela
+    AFTER INSERT
+    AS
+    BEGIN
+        UPDATE t
+        SET t.stockActual = 
+            CASE 
+                WHEN i.tipoMovimiento = ''Entrada'' THEN t.stockActual + i.cantidad
+                WHEN i.tipoMovimiento = ''Salida'' THEN t.stockActual - i.cantidad
+            END
+        FROM Tela t
+        INNER JOIN inserted i ON t.idTela = i.idTela
+    END
+    ');
+END
+GO
